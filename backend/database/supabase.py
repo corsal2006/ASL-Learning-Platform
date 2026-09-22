@@ -44,10 +44,13 @@ if DATABASE_URL:
         SessionLocal = None
 
 
+from fastapi import HTTPException
+
+
 def get_db():
     """Dependency for getting database session"""
     if SessionLocal is None:
-        raise Exception("Database not configured")
+        raise HTTPException(status_code=503, detail="Database not configured")
 
     db = SessionLocal()
     try:
@@ -59,5 +62,6 @@ def get_db():
 def get_supabase_client() -> Client:
     """Get Supabase client instance"""
     if supabase is None:
-        raise Exception("Supabase not configured")
+        raise HTTPException(status_code=503, detail="Supabase not configured")
     return supabase
+

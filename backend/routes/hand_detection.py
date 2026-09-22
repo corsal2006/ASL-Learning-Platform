@@ -5,11 +5,18 @@ Note: MediaPipe requires Python 3.8-3.12. For Python 3.13+, this is a placeholde
 that returns a simple response. Install MediaPipe separately if needed.
 """
 from fastapi import APIRouter, HTTPException
-import cv2
-import numpy as np
 import base64
 from pydantic import BaseModel
 from typing import List, Optional
+
+try:
+    import cv2
+    import numpy as np
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    np = None
+    CV2_AVAILABLE = False
 
 router = APIRouter()
 
@@ -27,10 +34,9 @@ try:
         min_tracking_confidence=0.5
     )
     MEDIAPIPE_AVAILABLE = True
-except ImportError:
-    print("MediaPipe not available. Install with: pip install mediapipe (Python 3.8-3.12 only)")
-    print("Hand detection endpoint will return mock data.")
+except (ImportError, Exception):
     MEDIAPIPE_AVAILABLE = False
+
 
 
 class HandDetectionRequest(BaseModel):
@@ -59,13 +65,14 @@ async def detect_hands(request: HandDetectionRequest):
     Detect hands in an image and return landmarks
     Used for max_performance mode - offloads processing to server
     """
-    if not MEDIAPIPE_AVAILABLE:
-        # Return empty response if MediaPipe is not available
+    if not MEDIAPIPE_AVAILABLE or not CV2_AVAILABLE:
+        # Return empty response if MediaPipe or OpenCV is not available
         return HandDetectionResponse(
             landmarks=[],
             hand_count=0,
             annotated_image=None
         )
+
 
     try:
         # Decode base64 image

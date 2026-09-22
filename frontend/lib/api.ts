@@ -1,13 +1,26 @@
 // API client for backend communication
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL !== undefined && process.env.NEXT_PUBLIC_API_URL !== '') {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return ''; // In production (Vercel), relative path proxies via Vercel rewrites
+    }
+  }
+  return 'http://localhost:8000';
+}
 
 async function apiRequest<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
+  const apiUrl = getApiUrl();
   try {
-    const response = await fetch(`${API_URL}${endpoint}`, {
+    const response = await fetch(`${apiUrl}${endpoint}`, {
+
       headers: {
         'Content-Type': 'application/json',
         ...options?.headers,
@@ -32,7 +45,7 @@ async function apiRequest<T>(
     // Handle network errors (backend not running, CORS, etc.)
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
       throw new Error(
-        `Failed to connect to backend API at ${API_URL}. Make sure the backend server is running.`
+        `Failed to connect to backend API at ${apiUrl || 'local server'}. Make sure the backend server is running.`
       );
     }
     throw error;

@@ -15,7 +15,18 @@ export interface ServerHandDetectionResponse {
   annotated_image?: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+function getApiUrl(): string {
+  if (process.env.NEXT_PUBLIC_API_URL !== undefined && process.env.NEXT_PUBLIC_API_URL !== '') {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return ''; // In production (Vercel), relative path proxies via Vercel rewrites
+    }
+  }
+  return 'http://localhost:8000';
+}
 
 /**
  * Send frame to server for hand detection
@@ -24,8 +35,10 @@ export async function detectHandsOnServer(
   imageDataUrl: string,
   returnAnnotatedImage: boolean = false
 ): Promise<ServerHandDetectionResponse> {
+  const apiUrl = getApiUrl();
   try {
-    const response = await fetch(`${API_URL}/api/hand-detection/detect-hands`, {
+    const response = await fetch(`${apiUrl}/api/hand-detection/detect-hands`, {
+
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -13,6 +13,24 @@
   },
   "rewrites": [
     {
+      "source": "/api/luna",
+      "destination": {
+        "service": "frontend"
+      }
+    },
+    {
+      "source": "/api/ai/chat",
+      "destination": {
+        "service": "frontend"
+      }
+    },
+    {
+      "source": "/api/recognition/feedback",
+      "destination": {
+        "service": "frontend"
+      }
+    },
+    {
       "source": "/api/(.*)",
       "destination": {
         "service": "backend"
