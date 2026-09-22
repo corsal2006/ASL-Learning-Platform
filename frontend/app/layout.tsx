@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Sora, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "@/contexts/AuthContext";
 import { SettingsProvider } from "@/contexts/SettingsContext";
+import { LunaProvider } from "@/contexts/LunaContext";
+import { LunaAssistant } from "@/components/LunaAssistant";
 import { Toaster } from "react-hot-toast";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const sora = Sora({
   subsets: ["latin"],
+  variable: "--font-sora",
+  display: "swap",
+  weight: ["100", "200", "300", "400", "500", "600", "700", "800"],
 });
 
 const geistMono = Geist_Mono({
@@ -16,8 +19,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ASL Learning Platform",
-  description: "Learn American Sign Language with real-time hand tracking",
+  title: "SIGNVISION — AI-Powered American Sign Language Learning",
+  description:
+    "Master American Sign Language with real-time browser-native computer vision hand tracking, interactive 3D guided lessons, voice instruction, and Luna AI assistant.",
 };
 
 export default function RootLayout({
@@ -26,31 +30,35 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark scroll-smooth">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-white`}
+        className={`${sora.variable} ${geistMono.variable} font-sans antialiased bg-[#02060f] text-white selection:bg-cyan-500/30 selection:text-white min-h-screen flex flex-col`}
       >
-        <AuthProvider>
-          <SettingsProvider>
+        <SettingsProvider>
+          <LunaProvider>
             {children}
-          </SettingsProvider>
+
+            {/* Floating AI ASL Tutor accessible everywhere */}
+            <LunaAssistant />
+          </LunaProvider>
+
           <Toaster
             position="top-right"
             toastOptions={{
-              duration: 4000,
+              duration: 3500,
               style: {
-                background: '#363636',
+                background: '#07111F',
                 color: '#fff',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(16px)',
               },
               success: {
-                duration: 3000,
                 iconTheme: {
                   primary: '#10b981',
                   secondary: '#fff',
                 },
               },
               error: {
-                duration: 4000,
                 iconTheme: {
                   primary: '#ef4444',
                   secondary: '#fff',
@@ -58,7 +66,7 @@ export default function RootLayout({
               },
             }}
           />
-        </AuthProvider>
+        </SettingsProvider>
       </body>
     </html>
   );

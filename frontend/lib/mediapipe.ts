@@ -124,9 +124,9 @@ export async function startCamera(
     videoDrawAnimationId = requestAnimationFrame(drawVideoContinuously);
   }
 
-  // Performance optimization: limit MediaPipe to ~20 FPS (50ms between frames)
-  // This prevents overwhelming the GPU/CPU while still feeling responsive
-  const FRAME_THROTTLE_MS = 50;
+  // Performance optimization: limit MediaPipe to ~30 FPS (33ms between frames)
+  // Provides fluid tracking while balancing CPU/GPU performance
+  const FRAME_THROTTLE_MS = 33;
   let isProcessing = false;
   let animationFrameId: number | null = null;
   let shouldContinue = true;
@@ -243,25 +243,232 @@ export async function startCamera(
 }
 
 /**
- * Draw hand landmarks on canvas
- * Note: Video is now drawn continuously in a separate loop for 100% uptime.
- * This function is kept for compatibility but video drawing is handled elsewhere.
+ * Draw hand landmarks on canvas with a futuristic computer-vision aesthetic
  */
 export function drawHands(
   canvasCtx: CanvasRenderingContext2D,
   results: MediaPipeResults,
   width: number,
   height: number,
-  videoElement?: HTMLVideoElement
+  videoElement?: HTMLVideoElement,
+  options?: {
+    drawSkeleton?: boolean;
+    drawBoundingBox?: boolean;
+    accentColor?: string;
+  }
 ) {
-  // Video is drawn continuously in startCamera() for 100% uptime
-  // This function is kept for compatibility but doesn't need to draw video
-  // Hand landmarks and connections are not drawn - only video is displayed
-  // (Landmarks are still detected and used for recognition, just not visualized)
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    return;
+  }
+
+  const {
+    drawSkeleton = true,
+    drawBoundingBox = true,
+    accentColor = '#38bdf8',
+  } = options || {};
+
+  const landmarks = results.multiHandLandmarks[0];
+  if (!landmarks || landmarks.length < 21) return;
+
+  canvasCtx.save();
+
+  if (drawSkeleton) {
+    // Draw cybernetic glowing connectors
+    canvasCtx.shadowColor = 'rgba(56, 189, 248, 0.7)';
+    canvasCtx.shadowBlur = 8;
+    canvasCtx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+    canvasCtx.lineWidth = 2.5;
+    canvasCtx.lineCap = 'round';
+    canvasCtx.lineJoin = 'round';
+
+    canvasCtx.beginPath();
+    for (const [start, end] of HAND_CONNECTIONS) {
+      const p1 = landmarks[start];
+      const p2 = landmarks[end];
+      canvasCtx.moveTo(p1.x * width, p1.y * height);
+      canvasCtx.lineTo(p2.x * width, p2.y * height);
+    }
+    canvasCtx.stroke();
+
+    // Draw secondary gold accent lines for fingertips
+    canvasCtx.shadowColor = 'rgba(251, 191, 36, 0.8)';
+    canvasCtx.shadowBlur = 6;
+    canvasCtx.strokeStyle = 'rgba(251, 191, 36, 0.9)';
+    canvasCtx.lineWidth = 2;
+
+    const FINGERTIP_TIPS = [
+      [3, 4],   // Thumb tip
+      [7, 8],   // Index tip
+      [11, 12], // Middle tip
+      [15, 16], // Ring tip
+      [19, 20], // Pinky tip
+    ];
+
+    canvasCtx.beginPath();
+    for (const [start, end] of FINGERTIP_TIPS) {
+      const p1 = landmarks[start];
+      const p2 = landmarks[end];
+      canvasCtx.moveTo(p1.x * width, p1.y * height);
+      canvasCtx.lineTo(p2.x * width, p2.y * height);
+    }
+    canvasCtx.stroke();
+
+    // Draw landmark nodes
+    landmarks.forEach((lm: any, idx: number) => {
+      const x = lm.x * width;
+      const y = lm.y * height;
+      const isTip = [4, 8, 12, 16, 20].includes(idx);
+      const isWrist = idx === 0;
+
+      canvasCtx.shadowBlur = isTip ? 12 : 6;
+      canvasCtx.shadowColor = isTip ? '#fbbf24' : '#38bdf8';
+
+      // Outer ring
+      canvasCtx.beginPath();
+      canvasCtx.arc(x, y, isTip ? 5 : isWrist ? 6 : 3.5, 0, 2 * Math.PI);
+      canvasCtx.fillStyle = isTip ? '#fbbf24' : '#ffffff';
+      canvasCtx.fill();
+
+      // Core dot
+      canvasCtx.beginPath();
+      canvasCtx.arc(x, y, isTip ? 2.5 : 1.8, 0, 2 * Math.PI);
+      canvasCtx.fillStyle = '#02060f';
+      canvasCtx.fill();
+    });
+  }
+
+  // Draw futuristic cybernetic corner brackets around hand bounding box
+  if (drawBoundingBox) {
+    let minX = width;
+    let maxX = 0;
+    let minY = height;
+    let maxY = 0;
+
+    for (const lm of landmarks) {
+      const x = lm.x * width;
+      const y = lm.y * height;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+
+    const pad = 24;
+    const boxX = Math.max(10, minX - pad);
+    const boxY = Math.max(10, minY - pad);
+    const boxW = Math.min(width - boxX - 10, maxX - minX + pad * 2);
+    const boxH = Math.min(height - boxY - 10, maxY - minY + pad * 2);
+    const bracketLen = Math.min(20, Math.min(boxW, boxH) * 0.25);
+
+    canvasCtx.shadowColor = 'rgba(56, 189, 248, 0.5)';
+    canvasCtx.shadowBlur = 6;
+    canvasCtx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+    canvasCtx.lineWidth = 2;
+
+    // Top-left
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(boxX, boxY + bracketLen);
+    canvasCtx.lineTo(boxX, boxY);
+    canvasCtx.lineTo(boxX + bracketLen, boxY);
+    canvasCtx.stroke();
+
+    // Top-right
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(boxX + boxW - bracketLen, boxY);
+    canvasCtx.lineTo(boxX + boxW, boxY);
+    canvasCtx.lineTo(boxX + boxW, boxY + bracketLen);
+    canvasCtx.stroke();
+
+    // Bottom-left
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(boxX, boxY + boxH - bracketLen);
+    canvasCtx.lineTo(boxX, boxY + boxH);
+    canvasCtx.lineTo(boxX + bracketLen, boxY + boxH);
+    canvasCtx.stroke();
+
+    // Bottom-right
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(boxX + boxW - bracketLen, boxY + boxH);
+    canvasCtx.lineTo(boxX + boxW, boxY + boxH);
+    canvasCtx.lineTo(boxX + boxW, boxY + boxH - bracketLen);
+    canvasCtx.stroke();
+  }
+
+  canvasCtx.restore();
+}
+
+/**
+ * Draw guide box when waiting for hand positioning or evaluating placement
+ */
+export function drawGuideBox(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  state: 'waiting' | 'positioned' | 'warning' = 'waiting'
+) {
+  const guideW = width * 0.48;
+  const guideH = height * 0.62;
+  const guideX = (width - guideW) / 2;
+  const guideY = (height - guideH) / 2;
+  const corner = 22;
+
+  let baseColor = 'rgba(255, 255, 255, 0.2)';
+  let accentColor = 'rgba(56, 189, 248, 0.85)'; // cyan default
+
+  if (state === 'positioned') {
+    baseColor = 'rgba(52, 211, 153, 0.3)';
+    accentColor = 'rgba(52, 211, 153, 0.95)'; // emerald
+  } else if (state === 'warning') {
+    baseColor = 'rgba(251, 191, 36, 0.3)';
+    accentColor = 'rgba(251, 191, 36, 0.95)'; // amber
+  }
+
+  ctx.save();
+  ctx.strokeStyle = baseColor;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 5]);
+  ctx.strokeRect(guideX, guideY, guideW, guideH);
+  ctx.setLineDash([]);
+
+  // Solid corner accents
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Top-left
+  ctx.beginPath();
+  ctx.moveTo(guideX, guideY + corner);
+  ctx.lineTo(guideX, guideY);
+  ctx.lineTo(guideX + corner, guideY);
+  ctx.stroke();
+
+  // Top-right
+  ctx.beginPath();
+  ctx.moveTo(guideX + guideW - corner, guideY);
+  ctx.lineTo(guideX + guideW, guideY);
+  ctx.lineTo(guideX + guideW, guideY + corner);
+  ctx.stroke();
+
+  // Bottom-left
+  ctx.beginPath();
+  ctx.moveTo(guideX, guideY + guideH - corner);
+  ctx.lineTo(guideX, guideY + guideH);
+  ctx.lineTo(guideX + corner, guideY + guideH);
+  ctx.stroke();
+
+  // Bottom-right
+  ctx.beginPath();
+  ctx.moveTo(guideX + guideW - corner, guideY + guideH);
+  ctx.lineTo(guideX + guideW, guideY + guideH);
+  ctx.lineTo(guideX + guideW, guideY + guideH - corner);
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 // Hand connection lines (MediaPipe hand model)
-const HAND_CONNECTIONS = [
+export const HAND_CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4],  // Thumb
   [0, 5], [5, 6], [6, 7], [7, 8],  // Index
   [0, 9], [9, 10], [10, 11], [11, 12],  // Middle
@@ -270,47 +477,3 @@ const HAND_CONNECTIONS = [
   [5, 9], [9, 13], [13, 17],  // Palm
 ];
 
-function drawConnectors(
-  ctx: CanvasRenderingContext2D,
-  landmarks: any[],
-  connections: number[][]
-) {
-  const canvasWidth = ctx.canvas.width;
-  const canvasHeight = ctx.canvas.height;
-
-  ctx.strokeStyle = '#00FF00';
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // Batch all strokes in a single path for better performance
-  ctx.beginPath();
-  for (const [start, end] of connections) {
-    const startLandmark = landmarks[start];
-    const endLandmark = landmarks[end];
-
-    ctx.moveTo(startLandmark.x * canvasWidth, startLandmark.y * canvasHeight);
-    ctx.lineTo(endLandmark.x * canvasWidth, endLandmark.y * canvasHeight);
-  }
-  ctx.stroke();
-}
-
-function drawLandmarks(ctx: CanvasRenderingContext2D, landmarks: any[]) {
-  const canvasWidth = ctx.canvas.width;
-  const canvasHeight = ctx.canvas.height;
-
-  ctx.fillStyle = '#FF0000';
-
-  // Draw all landmarks (more efficient than creating path for each)
-  for (const landmark of landmarks) {
-    ctx.beginPath();
-    ctx.arc(
-      landmark.x * canvasWidth,
-      landmark.y * canvasHeight,
-      5,
-      0,
-      2 * Math.PI
-    );
-    ctx.fill();
-  }
-}

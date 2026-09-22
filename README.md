@@ -1,119 +1,117 @@
-# ASL Learning Platform
+# SignVision — ASL Learning Platform
 
-> Browser-native, real-time American Sign Language recognition — **98.98% accurate**, running entirely on-device with WebGL GPU acceleration.
+An accessible, browser-first learning platform for practicing American Sign Language (ASL). SignVision combines guided lessons, a visual reference library, real-time hand tracking, quizzes, and an AI learning companion in one responsive experience.
 
-**[Live Demo](https://asl-learning-platform-psi.vercel.app/)** 
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vercel](https://img.shields.io/badge/Deploy-Vercel-000000?logo=vercel&logoColor=white)](https://vercel.com/)
 
-![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=nextdotjs&logoColor=white)
-![React](https://img.shields.io/badge/React_19-20232a?style=flat-square&logo=react&logoColor=61DAFB)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
-![ONNX](https://img.shields.io/badge/ONNX_Runtime-grey?style=flat-square&logo=onnx&logoColor=white)
-![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat-square&logo=supabase&logoColor=white)
+## Highlights
 
----
+- Learn ASL alphabet, words, numbers, and phrases with curated visual references.
+- Practice signs with live webcam landmark detection and on-device ONNX inference.
+- Build momentum through guided lessons, quizzes, timed challenges, and a progress dashboard.
+- Ask Luna, the built-in learning companion, for lesson help and approachable explanations.
+- Keep the experience private by running the primary recognition loop in the browser.
 
-## Technical Highlights
+## Screenshots
 
-- **On-device ML inference** — The recognition pipeline runs 100% in the browser. A PyTorch MLP trained on 87,000 images was converted to ONNX format and served via ONNX Runtime Web with WebGL GPU acceleration, achieving **<50ms inference latency** with zero server roundtrips.
-- **98.98% test accuracy, 99.18% validation accuracy** — 5-layer MLP (~50K parameters, 87 epochs) trained on the [Kaggle ASL Alphabet dataset](https://www.kaggle.com/datasets/grassknoted/asl-alphabet), classifying all 26 ASL alphabet signs (A–Z).
-- **Real-time hand tracking at ~10 FPS** — MediaPipe Hands processes the webcam feed each frame, extracting 21 landmarks (63 x/y/z features) as model input for instant sign classification.
-- **Full-stack, fully deployed** — Next.js 16 + React 19 frontend on Vercel; FastAPI backend on Render; PostgreSQL + Auth on Supabase.
+| Home | Learning journey |
+| --- | --- |
+| ![SignVision home screen](docs/screenshots/home.png) | ![SignVision learning journey](docs/screenshots/journey.png) |
 
----
+| Practice | Reference guide |
+| --- | --- |
+| ![SignVision practice screen](docs/screenshots/practice.png) | ![SignVision reference guide](docs/screenshots/reference.png) |
 
-## Architecture
+## How it works
 
-```
-Webcam
-  └─► MediaPipe Hands ──► 63 landmark features
-                               └─► ONNX Runtime Web (WebGL GPU)
-                                        └─► Sign prediction + confidence
-                                                   │
-                                         [all client-side — no roundtrip]
-
-User progress / Lessons ◄──► FastAPI (Render) ◄──► Supabase (PostgreSQL)
+```text
+Webcam → MediaPipe Hands → 21 landmarks → ONNX Runtime Web → sign prediction
+                                      ↓
+                              lessons & progress API → Supabase
 ```
 
-The ML pipeline is **entirely client-side** — the backend only handles authentication, lesson content, and progress persistence.
+The recognition pipeline runs client-side with MediaPipe Hands and ONNX Runtime Web. The FastAPI service provides lessons, progress, optional server-side hand analysis, and Luna AI endpoints.
 
----
+## Tech stack
 
-## Features
+| Area | Tools |
+| --- | --- |
+| Web app | Next.js 16, React 19, TypeScript, Tailwind CSS |
+| Sign recognition | MediaPipe Hands, ONNX Runtime Web, WebGL |
+| API | FastAPI, Uvicorn, SQLAlchemy |
+| Data & auth | Supabase PostgreSQL and Auth |
+| Deployment | Vercel (frontend and backend) |
 
-| | |
-|---|---|
-| **Real-time Practice** | Live webcam ASL recognition with per-frame confidence score |
-| **Time Challenge** | Race-the-clock mode with automatic letter progression |
-| **Guided Lessons** | Step-by-step instructions and common-mistake callouts for all 26 letters |
-| **Quiz Mode** | Random, category, or custom-letter quizzes with instant feedback |
-| **Reference Guide** | Visual lookup for all 26 ASL alphabet signs |
-| **Progress Dashboard** | Accuracy stats, session history, and per-letter mastery tracking |
-| **Authentication** | Email and Google OAuth via Supabase Auth |
+## Run locally
 
----
+### Frontend
 
-## Stack
-
-| Layer | Technologies |
-|---|---|
-| **Frontend** | Next.js 16, React 19, TypeScript, Tailwind CSS v4, Framer Motion, Recharts |
-| **On-device ML** | ONNX Runtime Web, MediaPipe Hands, WebGL (GPU acceleration) |
-| **ML Training** | PyTorch, NumPy, OpenCV, MediaPipe |
-| **Backend** | FastAPI, Python, SQLAlchemy, Uvicorn |
-| **Database / Auth** | Supabase — PostgreSQL + Auth (Email & Google OAuth) |
-| **Deployment** | Vercel (frontend) · Render (backend) · Supabase (database) |
-
----
-
-## Getting Started
-
-**Frontend**
 ```bash
 cd frontend
-cp .env.example .env.local   # add your Supabase URL and anon key
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-**Backend**
+Open [http://localhost:3000](http://localhost:3000).
+
+### Backend
+
 ```bash
 cd backend
+cp .env.example .env
 pip install -r requirements.txt
-# export SUPABASE_URL=... SUPABASE_KEY=...
-./run.sh
+uvicorn main:app --reload --port 8000
 ```
 
-API reference available at `http://localhost:8000/docs`.
+The API documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
----
+## Environment variables
 
-## Model Details
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | frontend | Public URL of the deployed FastAPI service |
+| `NEXT_PUBLIC_SUPABASE_URL` | frontend | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | frontend | Supabase public anonymous key |
+| `FRONTEND_URL` | backend | Deployed frontend URL for CORS; use commas for multiple origins |
+| `SUPABASE_URL` / `SUPABASE_KEY` | backend | Supabase server configuration |
+| `GROQ_API_KEY` | backend | Optional Luna AI provider key |
 
-| | |
-|---|---|
-| Architecture | 5-layer MLP |
-| Parameters | ~50,000 |
-| Input | 63 features (21 landmarks × x, y, z) |
-| Classes | 26 (A–Z) |
-| Test Accuracy | **98.98%** |
-| Validation Accuracy | **99.18%** |
-| Training Epochs | 87 |
-| Dataset | [Kaggle ASL Alphabet](https://www.kaggle.com/datasets/grassknoted/asl-alphabet) — 87,000 images |
-| Export | ONNX (converted from PyTorch) |
-| Inference | ONNX Runtime Web + WebGL — **<50ms** client-side |
+Never commit real environment values. Use the provided `.env.example` files as templates.
 
----
+## Deploy on Vercel
 
-## API
+Deploy as two Vercel projects from this repository:
 
-| Endpoint | Description |
-|---|---|
-| `GET /api/lessons/` | All lesson modules |
-| `GET /api/lessons/{id}` | Single lesson by ID |
-| `GET /api/progress/user/{user_id}` | User progress summary |
-| `POST /api/progress/` | Update letter progress |
-| `POST /api/progress/session` | Record a practice session |
-| `GET /health` | Health check |
+1. **Backend** — Import the repository, set **Root Directory** to `backend`, and deploy. Add `FRONTEND_URL` after the frontend URL is known, along with any Supabase and optional AI variables.
+2. **Frontend** — Import the same repository a second time, set **Root Directory** to `frontend`, and deploy. Set `NEXT_PUBLIC_API_URL` to the backend deployment URL and add the Supabase public values.
+3. Update the backend's `FRONTEND_URL` with the frontend deployment URL, then redeploy the backend.
+
+`backend/vercel.json` routes all backend requests to the FastAPI entry point, including `/health` and `/api/*`.
+
+## API at a glance
+
+| Route | Purpose |
+| --- | --- |
+| `GET /health` | Service health and enabled modules |
+| `GET /api/lessons/` | Lesson catalogue |
+| `GET /api/lessons/{id}` | One lesson |
+| `GET /api/progress/user/{user_id}` | Learner progress |
+| `POST /api/progress/` | Store letter progress |
+| `POST /api/recognition/*` | Recognition feedback |
+| `POST /api/ai/*` | Luna tutoring support |
+
+## Project structure
+
+```text
+frontend/             Next.js application and browser-side recognition
+backend/              FastAPI service, database code, and ML utilities
+backend/api/index.py  Vercel serverless entry point
+```
+
+## License
+
+This project is provided for learning and demonstration purposes.

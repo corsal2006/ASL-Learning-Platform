@@ -22,7 +22,7 @@ interface LabelMapping {
 class ONNXInference {
   private session: ort.InferenceSession | null = null;
   private labels: LabelMapping | null = null;
-  private isLoading: boolean = false;
+  private static loadPromise: Promise<void> | null = null;
   private static readonly ALPHABET_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
   async loadModel(): Promise<void> {
@@ -30,17 +30,12 @@ class ONNXInference {
       return; // Already loaded
     }
 
-    if (this.isLoading) {
-      // Wait for current loading to finish
-      while (this.isLoading) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      return;
+    if (ONNXInference.loadPromise) {
+      return ONNXInference.loadPromise;
     }
 
-    this.isLoading = true;
-
-    try {
+    ONNXInference.loadPromise = (async () => {
+      try {
       // Load label mapping
       const labelsResponse = await fetch('/models/labels.json');
       if (!labelsResponse.ok) {
@@ -92,28 +87,35 @@ class ONNXInference {
       console.log(`  Throttled to: ~10 FPS for optimal performance`);
     } catch (error) {
       console.error('Failed to load ONNX model:', error);
+      ONNXInference.loadPromise = null;
       throw error;
-    } finally {
-      this.isLoading = false;
     }
+    })();
+
+    return ONNXInference.loadPromise;
   }
 
-  async predict(landmarks: number[][]): Promise<ModelPrediction> {
+  async predict(landmarks: number[][] | Float32Array): Promise<ModelPrediction> {
     if (!this.session || !this.labels) {
       throw new Error('Model not loaded. Call loadModel() first.');
     }
 
-    // Flatten landmarks to 1D array (21 landmarks × 3 coordinates = 63 features)
-    const flatLandmarks = landmarks.flat();
-
-    if (flatLandmarks.length !== 63) {
-      throw new Error(`Expected 63 features, got ${flatLandmarks.length}`);
+    // Flatten landmarks to Float32Array (21 landmarks × 3 coordinates = 63 features)
+    let flatLandmarks: Float32Array;
+    if (landmarks instanceof Float32Array) {
+      flatLandmarks = landmarks;
+    } else {
+      const flat = (landmarks as number[][]).flat();
+      if (flat.length !== 63) {
+        throw new Error(`Expected 63 features, got ${flat.length}`);
+      }
+      flatLandmarks = new Float32Array(flat);
     }
 
     // Create input tensor (shape: [1, 63])
     const inputTensor = new ort.Tensor(
       'float32',
-      new Float32Array(flatLandmarks),
+      flatLandmarks,
       [1, 63]
     );
 

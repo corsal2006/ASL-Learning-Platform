@@ -88,26 +88,53 @@ export function AdaptiveCameraFeed({
   const lastHandCountRef = useRef<number>(0);
   const serverIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const serverErrorCountRef = useRef<number>(0);
-  const currentLandmarksRef = useRef<any[] | null>(null); // Store current landmarks for continuous drawing
+  const currentLandmarksRef = useRef<any[] | null>(null);
+  const mountedRef = useRef<boolean>(true);
+
+  // Callback and prop refs so parent updates never trigger camera lifecycle restarts
+  const onHandDetectedRef = useRef(onHandDetected);
+  const widthRef = useRef(width);
+  const heightRef = useRef(height);
+
+  useEffect(() => {
+    onHandDetectedRef.current = onHandDetected;
+  }, [onHandDetected]);
+
+  useEffect(() => {
+    widthRef.current = width;
+    heightRef.current = height;
+  }, [width, height]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Always use client mode (balanced) - server mode disabled
   const isServerMode = false;
 
-  // Client-side real-time processing
+  // Client-side real-time processing — stable reference
   const initializeClientMode = useCallback(async () => {
+    if (streamRef.current) return;
     if (!videoRef.current || !canvasRef.current) return;
+
+    const currentW = widthRef.current;
+    const currentH = heightRef.current;
 
     try {
       // Initialize MediaPipe Hands
       const hands = await initializeHands((results: MediaPipeResults) => {
+        if (!mountedRef.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Draw the hands on canvas - pass video element to ensure video is always drawn
-        drawHands(ctx, results, width, height, videoRef.current || undefined);
+        // Draw the hands on canvas
+        drawHands(ctx, results, widthRef.current, heightRef.current, videoRef.current || undefined);
 
         // Update hand count
         const currentHandCount = results.multiHandLandmarks?.length || 0;
@@ -116,45 +143,55 @@ export function AdaptiveCameraFeed({
           setHandsDetected(currentHandCount);
         }
 
-        // Callback for hand detection
-        if (onHandDetected && results.multiHandLandmarks) {
-          onHandDetected(results);
+        // Invoke callback via ref — NEVER restarts camera
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+          onHandDetectedRef.current?.(results);
         }
       });
 
-      if (!videoRef.current) return;
+      if (!mountedRef.current || !videoRef.current) return;
 
       handsRef.current = hands;
 
       // Start camera with continuous video drawing
       const stream = await startCamera(videoRef.current, hands, canvasRef.current);
+      if (!mountedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       streamRef.current = stream;
       setError(null);
     } catch (err: any) {
+      if (!mountedRef.current) return;
       console.error('Error initializing client mode:', err);
 
-      // Ignore errors that happen during cleanup/unmount
       const errorMsg = err?.message || '';
       if (errorMsg.includes('interrupted') || errorMsg.includes('AbortError')) {
-        return; // Component is unmounting, ignore
+        return;
       }
 
       setError('Failed to access camera or load MediaPipe');
       setIsActive(false);
     }
-  }, [width, height, onHandDetected]);
+  }, []);
 
-  // Server-side snapshot processing
+  // Server-side snapshot processing — stable reference
   const initializeServerMode = useCallback(async () => {
+    if (streamRef.current) return;
     if (!videoRef.current || !canvasRef.current) return;
 
+    const currentW = widthRef.current;
+    const currentH = heightRef.current;
+
     try {
-      // Just start the camera without MediaPipe
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width, height },
+        video: { width: currentW, height: currentH },
       });
 
-      if (!videoRef.current) return;
+      if (!mountedRef.current || !videoRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
 
       videoRef.current.srcObject = stream;
       videoRef.current.playsInline = true;
@@ -163,7 +200,6 @@ export function AdaptiveCameraFeed({
       try {
         await videoRef.current.play();
       } catch (playError: any) {
-        // Ignore "interrupted by new load" errors during cleanup
         if (!playError.message?.includes('interrupted')) {
           throw playError;
         }
@@ -171,7 +207,6 @@ export function AdaptiveCameraFeed({
 
       streamRef.current = stream;
 
-      // Draw video continuously on canvas (maximum speed - no throttling)
       let animationFrameId: number | null = null;
 
       const drawVideoFrame = () => {
@@ -183,18 +218,13 @@ export function AdaptiveCameraFeed({
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          // Draw video frame
-          ctx.drawImage(videoRef.current, 0, 0, width, height);
-
-          // Hand landmarks are not drawn - only video is displayed
-          // (Landmarks are still detected and used for recognition, just not visualized)
+          ctx.drawImage(videoRef.current, 0, 0, widthRef.current, heightRef.current);
         }
 
         animationFrameId = requestAnimationFrame(drawVideoFrame);
       };
       animationFrameId = requestAnimationFrame(drawVideoFrame);
 
-      // Store cleanup function for video drawing
       (videoRef.current as any).__stopVideoDrawing = () => {
         if (animationFrameId) {
           cancelAnimationFrame(animationFrameId);
@@ -202,115 +232,73 @@ export function AdaptiveCameraFeed({
         }
       };
 
-      // Process frames periodically (like the other repo - every few seconds)
       const processServerFrame = () => {
-        if (!videoRef.current || !canvasRef.current) return;
+        if (!videoRef.current || !canvasRef.current || !mountedRef.current) return;
 
-        // Run detection asynchronously without blocking
         (async () => {
           try {
-            // Capture current frame - check video ref again inside async
             const video = videoRef.current;
             if (!video) return;
 
             const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = width;
-            tempCanvas.height = height;
+            tempCanvas.width = widthRef.current;
+            tempCanvas.height = heightRef.current;
             const tempCtx = tempCanvas.getContext('2d');
             if (!tempCtx) return;
 
-            tempCtx.drawImage(video, 0, 0, width, height);
+            tempCtx.drawImage(video, 0, 0, widthRef.current, heightRef.current);
             const imageDataUrl = tempCanvas.toDataURL('image/jpeg', 0.8);
 
-            // Send to server for detection
             const response = await detectHandsOnServer(imageDataUrl, false);
+            if (!mountedRef.current) return;
 
-          // Update hand count
-          const currentHandCount = response?.hand_count || 0;
-          if (currentHandCount !== lastHandCountRef.current) {
-            lastHandCountRef.current = currentHandCount;
-            setHandsDetected(currentHandCount);
-          }
-
-          // If server returns landmarks, store them for continuous drawing
-          if (response && response.hand_count > 0) {
-            // Convert to MediaPipe format
-            const mediaPipeResults = convertServerLandmarksToMediaPipe(response.landmarks);
-
-            // Store landmarks for the drawing loop to use
-            if (mediaPipeResults.multiHandLandmarks?.length > 0) {
-              currentLandmarksRef.current = mediaPipeResults.multiHandLandmarks;
+            const currentHandCount = response?.hand_count || 0;
+            if (currentHandCount !== lastHandCountRef.current) {
+              lastHandCountRef.current = currentHandCount;
+              setHandsDetected(currentHandCount);
             }
 
-            // Callback
-            if (onHandDetected) {
-              const video = videoRef.current;
-              if (video) {
-                onHandDetected({
-                  image: video,
+            if (response && response.hand_count > 0) {
+              const mediaPipeResults = convertServerLandmarksToMediaPipe(response.landmarks);
+              if (mediaPipeResults.multiHandLandmarks?.length > 0) {
+                currentLandmarksRef.current = mediaPipeResults.multiHandLandmarks;
+              }
+
+              if (videoRef.current) {
+                onHandDetectedRef.current?.({
+                  image: videoRef.current,
                   ...mediaPipeResults
                 });
               }
+            } else {
+              currentLandmarksRef.current = null;
             }
-          } else {
-            // No hands detected, clear landmarks
-            currentLandmarksRef.current = null;
-          }
           } catch (err: any) {
             console.error('Server frame processing error:', err);
             serverErrorCountRef.current += 1;
 
-            // If server is unavailable, show helpful error after 3 failed attempts
             if (serverErrorCountRef.current >= 3 && !serverError) {
               setServerError(true);
-              console.warn('Server unavailable - hand detection requires backend with OpenCV/MediaPipe');
-              console.warn('Falling back to client-side mode recommended');
             }
           }
-        })(); // Execute async immediately
+        })();
       };
 
-      // Process every 2 seconds for smoothness (more frequent than the 10s in the other repo)
       serverIntervalRef.current = setInterval(processServerFrame, 2000);
-
-      // Do first detection immediately
       processServerFrame();
 
       setError(null);
     } catch (err: any) {
+      if (!mountedRef.current) return;
       console.error('Error initializing server mode:', err);
       setError('Failed to access camera');
       setIsActive(false);
     }
-  }, [width, height, onHandDetected]);
+  }, [serverError]);
 
-  // Initialize based on mode
+  // Clean camera lifecycle: ONLY starts when isActive === true, stops when isActive === false or unmounted
   useEffect(() => {
-    if (!isActive) return;
-
-    let isMounted = true;
-    let cleanupCalled = false;
-
-    const initialize = async () => {
-      // Small delay to prevent race conditions during mode switching
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      if (!isMounted || cleanupCalled) return;
-
-      if (isServerMode) {
-        await initializeServerMode();
-      } else {
-        await initializeClientMode();
-      }
-    };
-
-    initialize();
-
-    return () => {
-      // Cleanup
-      isMounted = false;
-      cleanupCalled = true;
-
+    if (!isActive) {
       // Stop server interval
       if (serverIntervalRef.current) {
         clearInterval(serverIntervalRef.current);
@@ -319,17 +307,23 @@ export function AdaptiveCameraFeed({
 
       // Stop frame processing
       if (videoRef.current && (videoRef.current as any).__stopFrameProcessing) {
-        (videoRef.current as any).__stopFrameProcessing();
+        try {
+          (videoRef.current as any).__stopFrameProcessing();
+        } catch (e) {}
       }
 
-      // Stop video drawing (for server mode)
+      // Stop video drawing
       if (videoRef.current && (videoRef.current as any).__stopVideoDrawing) {
-        (videoRef.current as any).__stopVideoDrawing();
+        try {
+          (videoRef.current as any).__stopVideoDrawing();
+        } catch (e) {}
       }
 
       // Stop camera stream
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        try {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        } catch (e) {}
         streamRef.current = null;
       }
 
@@ -337,9 +331,49 @@ export function AdaptiveCameraFeed({
       if (handsRef.current) {
         try {
           handsRef.current.close();
-        } catch (e) {
-          // Ignore
-        }
+        } catch (e) {}
+        handsRef.current = null;
+      }
+      return;
+    }
+
+    // When isActive becomes true
+    if (isServerMode) {
+      initializeServerMode();
+    } else {
+      initializeClientMode();
+    }
+
+    return () => {
+      // Cleanup on unmount or when isActive flips
+      if (serverIntervalRef.current) {
+        clearInterval(serverIntervalRef.current);
+        serverIntervalRef.current = null;
+      }
+
+      if (videoRef.current && (videoRef.current as any).__stopFrameProcessing) {
+        try {
+          (videoRef.current as any).__stopFrameProcessing();
+        } catch (e) {}
+      }
+
+      if (videoRef.current && (videoRef.current as any).__stopVideoDrawing) {
+        try {
+          (videoRef.current as any).__stopVideoDrawing();
+        } catch (e) {}
+      }
+
+      if (streamRef.current) {
+        try {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        } catch (e) {}
+        streamRef.current = null;
+      }
+
+      if (handsRef.current) {
+        try {
+          handsRef.current.close();
+        } catch (e) {}
         handsRef.current = null;
       }
     };
@@ -404,7 +438,7 @@ export function AdaptiveCameraFeed({
             <div className="absolute inset-0 flex items-center justify-center text-white">
               <div className="text-center">
                 <p className="text-lg mb-2">Camera is off</p>
-                <p className="text-sm text-gray-400">Click "Start Camera" to begin</p>
+                <p className="text-sm text-gray-400">Click &quot;Start Camera&quot; to begin</p>
               </div>
             </div>
           )}

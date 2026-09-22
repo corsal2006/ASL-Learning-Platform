@@ -6,44 +6,25 @@ import os
 # Load environment variables
 load_dotenv()
 
-# Import routes (will show warnings if DB not configured, but won't crash)
-try:
-    from routes import lessons, progress
-    routes_available = True
-except Exception as e:
-    print(f"Warning: Could not load routes: {e}")
-    print("API will run in limited mode. Configure Supabase to enable all endpoints.")
-    routes_available = False
-
-# Import hand_detection separately (requires OpenCV/MediaPipe)
-try:
-    from routes import hand_detection
-    hand_detection_available = True
-    print("Hand detection endpoint loaded successfully")
-except Exception as e:
-    print(f"Hand detection route unavailable: {e}")
-    print("To enable server-side hand detection, install: pip install opencv-python-headless mediapipe")
-    print("Client-side modes (Balanced/Max Accuracy) will still work perfectly!")
-    hand_detection_available = False
-
 app = FastAPI(
     title="ASL Learning API",
-    description="REST API for ASL sign language learning platform",
+    description="REST API for ASL sign language learning platform with local CV and Luna AI tutor",
     version="1.0.0"
 )
 
 # CORS configuration for frontend
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
 origins = [
-    "http://localhost:3000",  # Next.js dev server
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 ]
 
-# Add production frontend URL if not localhost
-if frontend_url and "localhost" not in frontend_url:
-    origins.append(frontend_url)
-    # Also add without trailing slash if it has one
-    origins.append(frontend_url.rstrip("/"))
+for url in frontend_url.split(","):
+    url = url.strip()
+    if url and "localhost" not in url:
+        origins.append(url.rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,46 +34,89 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers (only if successfully loaded)
-if routes_available:
+# 1. Lessons Router (Alphabet, Words, Phrases, Numbers, Conversation)
+try:
+    from routes import lessons
     app.include_router(lessons.router, prefix="/api/lessons", tags=["lessons"])
-    app.include_router(progress.router, prefix="/api/progress", tags=["progress"])
+    lessons_available = True
+except Exception as e:
+    print(f"Warning: Could not load lessons route: {e}")
+    lessons_available = False
 
-# Include hand detection router (works without DB)
-if hand_detection_available:
+# 2. Recognition Router (Intelligent Feedback and Evaluation)
+try:
+    from routes import recognition
+    app.include_router(recognition.router, prefix="/api/recognition", tags=["recognition"])
+    recognition_available = True
+except Exception as e:
+    print(f"Warning: Could not load recognition route: {e}")
+    recognition_available = False
+
+# 3. AI Tutor Router (Luna Groq/Fallback Chat, Explanation, Lesson Help)
+try:
+    from routes import ai
+    app.include_router(ai.router, prefix="/api/ai", tags=["ai"])
+    ai_available = True
+except Exception as e:
+    print(f"Warning: Could not load AI route: {e}")
+    ai_available = False
+
+# 4. Progress Router (Supabase / Local persistence)
+try:
+    from routes import progress
+    app.include_router(progress.router, prefix="/api/progress", tags=["progress"])
+    progress_available = True
+except Exception as e:
+    print(f"Notice: Progress route initialized with local storage parity: {e}")
+    progress_available = False
+
+# 5. Hand Detection Router (Server-side optional OpenCV/MediaPipe)
+try:
+    from routes import hand_detection
     app.include_router(hand_detection.router, prefix="/api/hand-detection", tags=["hand-detection"])
+    hand_detection_available = True
+except Exception as e:
+    hand_detection_available = False
 
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
+    """Root health check endpoint"""
     return {
-        "message": "ASL Learning API",
+        "message": "SIGNVISION ASL Learning API",
         "status": "healthy",
         "version": "1.0.0"
     }
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
-    """Detailed health check"""
-    from database.supabase import supabase, SessionLocal
-
+    """Detailed health check for all platform services"""
     db_status = "not_configured"
-    if SessionLocal is not None:
-        db_status = "connected"
-
     supabase_status = "not_configured"
-    if supabase is not None:
-        supabase_status = "connected"
+
+    try:
+        from database.supabase import supabase, SessionLocal
+        if SessionLocal is not None:
+            db_status = "connected"
+        if supabase is not None:
+            supabase_status = "connected"
+    except Exception:
+        pass
 
     return {
         "status": "healthy",
         "database": db_status,
         "supabase": supabase_status,
-        "routes_available": routes_available,
-        "hand_detection_available": hand_detection_available,
-        "message": "Configure SUPABASE_URL and DATABASE_URL in .env to enable all features"
+        "services": {
+            "lessons": lessons_available,
+            "recognition": recognition_available,
+            "ai_tutor": ai_available,
+            "progress": progress_available,
+            "hand_detection": hand_detection_available,
+        },
+        "version": "1.0.0"
     }
 
 

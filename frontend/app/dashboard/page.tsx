@@ -1,278 +1,269 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Navigation } from '@/components/Navigation';
-import { Card } from '@/components/ui/card';
-import { progressApi } from '@/lib/api';
+import progressStore, { UserJourney } from '@/lib/progress-store';
+import { ASL_CURRICULUM } from '@/lib/asl-curriculum';
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from 'recharts';
+  Trophy,
+  Flame,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  ArrowRight,
+  BookOpen,
+  Award,
+  Zap,
+} from 'lucide-react';
 
-interface UserStats {
-  user_id: string;
-  total_attempts: number;
-  correct_attempts: number;
-  accuracy_rate: number;
-  avg_lesson_accuracy: number;
-  lessons_practiced: number;
-}
-
-interface PracticeSession {
-  id: number;
-  sign_detected: string;
-  confidence: number;
-  is_correct: number;
-  timestamp: string;
-}
-
-export default function DashboardPage() {
-  const { user } = useAuth();
-  const [stats, setStats] = useState<UserStats | null>(null);
-  const [sessions, setSessions] = useState<PracticeSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export default function JourneyDashboardPage() {
+  const [journey, setJourney] = useState<UserJourney>(progressStore.getJourney());
 
   useEffect(() => {
-    if (!user) return;
+    setJourney(progressStore.getJourney());
+    const unsub = progressStore.subscribe(() => {
+      setJourney(progressStore.getJourney());
+    });
+    return unsub;
+  }, []);
 
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const [statsData, sessionsData] = await Promise.all([
-          progressApi.getUserStats(user.id),
-          progressApi.getUserSessions(user.id, 20),
-        ]);
-        setStats(statsData);
-        setSessions(sessionsData);
-      } catch (err: any) {
-        console.error('Dashboard error:', err);
-        setError(err.message || 'Failed to load dashboard data');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const totalLetters = 26;
+  const letterStatsList = Object.values(journey.letterStats);
+  const masteredList = letterStatsList.filter((s) => s.isMastered);
+  const masteryPct = Math.round((masteredList.length / totalLetters) * 100);
 
-    loadData();
-  }, [user]);
+  const recommendation = progressStore.getRecommendations();
+  const weakLetters = progressStore.getWeakLetters();
 
-  // Prepare chart data
-  const accuracyOverTime = sessions
-    .slice()
-    .reverse()
-    .map((session, index) => ({
-      attempt: index + 1,
-      accuracy: session.is_correct ? 100 : 0,
-      confidence: Math.round(session.confidence * 100),
-    }));
-
-  // Group sessions by sign
-  const signFrequency = sessions.reduce((acc, session) => {
-    const sign = session.sign_detected || 'Unknown';
-    acc[sign] = (acc[sign] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const signData = Object.entries(signFrequency)
-    .map(([sign, count]) => ({ sign, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
+  // Calculate overall accuracy
+  const totalAttempts = letterStatsList.reduce((acc, s) => acc + s.attempts, 0);
+  const totalCorrect = letterStatsList.reduce((acc, s) => acc + s.correct, 0);
+  const overallAccuracy = totalAttempts > 0 ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
 
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-black text-white">
-        <Navigation />
+    <div className="min-h-screen bg-[#02060f] text-white flex flex-col font-sans">
+      <Navigation />
 
-        <main className="container mx-auto px-4 py-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="mb-8">
-              <h2 className="text-4xl font-light mb-2 relative inline-block">
-                Dashboard
-                <div className="absolute -bottom-2 left-0 right-0 h-px bg-gradient-to-r from-white via-white/50 to-transparent" />
-              </h2>
-              <p className="text-gray-400 mt-4">Track your learning progress</p>
+      <main className="container mx-auto px-4 py-12 max-w-7xl flex-1">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10 pb-8 border-b border-white/10">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-mono mb-3">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>ZERO-ACCOUNT LOCAL JOURNEY</span>
+            </div>
+            <h1 className="text-3xl sm:text-5xl font-light text-white tracking-tight">
+              Your Learning <span className="font-semibold text-cyan-400">Journey</span>
+            </h1>
+            <p className="text-zinc-400 text-sm sm:text-base mt-2 font-light">
+              Your practice sessions, accuracy milestones, and personalized letter drills are saved directly to your device.
+            </p>
+          </div>
+
+          <Link
+            href="/learn"
+            className="px-6 py-3 rounded-full bg-cyan-500 text-black font-semibold text-xs uppercase tracking-wider hover:bg-cyan-400 transition-all flex items-center gap-2 self-start md:self-auto"
+          >
+            <span>Resume Lessons</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+
+        {/* 4 Stats Highlights Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+          {/* Alphabet Mastered */}
+          <div className="p-6 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-xl">
+            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block mb-1">
+              Alphabet Mastered
+            </span>
+            <div className="flex items-baseline gap-2 mb-3">
+              <span className="text-4xl font-bold font-mono text-cyan-400">{masteryPct}%</span>
+              <span className="text-xs text-zinc-400">({masteredList.length}/26)</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-zinc-800 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-500"
+                style={{ width: `${masteryPct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Daily Streak */}
+          <div className="p-6 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-xl">
+            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block mb-1">
+              Daily Practice Streak
+            </span>
+            <div className="flex items-center gap-3 mb-2">
+              <Flame className="w-8 h-8 text-amber-400 fill-amber-400" />
+              <span className="text-4xl font-bold font-mono text-amber-400">{journey.currentStreak}d</span>
+            </div>
+            <p className="text-[11px] text-zinc-400">Best record: {journey.bestStreak} days</p>
+          </div>
+
+          {/* Accuracy */}
+          <div className="p-6 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-xl">
+            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block mb-1">
+              Overall Accuracy
+            </span>
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="text-4xl font-bold font-mono text-emerald-400">{overallAccuracy}%</span>
+              <span className="text-xs text-zinc-400">({totalCorrect}/{totalAttempts})</span>
+            </div>
+            <p className="text-[11px] text-zinc-400">Calculated over real webcam sign attempts</p>
+          </div>
+
+          {/* Fastest Recognition */}
+          <div className="p-6 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-xl">
+            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block mb-1">
+              Fastest Recognition
+            </span>
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="w-6 h-6 text-purple-400" />
+              <span className="text-3xl font-bold font-mono text-purple-300">
+                {journey.fastestRecognitionMs > 0
+                  ? `${(journey.fastestRecognitionMs / 1000).toFixed(1)}s`
+                  : '—'}
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400">On-device neural latency</p>
+          </div>
+        </div>
+
+        {/* Personalized Recommendations Section (Section 26) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-12">
+          {/* Main Recommendation Banner */}
+          <div className="lg:col-span-8 p-8 rounded-3xl bg-gradient-to-br from-[#07111F] via-[#0B1A30] to-[#07111F] border border-cyan-500/30 backdrop-blur-2xl shadow-xl flex flex-col justify-between">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-mono mb-4">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>RECOMMENDED FOR YOU</span>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">{recommendation.title}</h3>
+              <p className="text-sm text-zinc-300 font-light leading-relaxed mb-6 max-w-xl">
+                {recommendation.description}
+              </p>
+
+              <div className="flex flex-wrap gap-2 mb-6">
+                {recommendation.letters.map((l) => (
+                  <span
+                    key={l}
+                    className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 text-white font-mono font-bold flex items-center justify-center text-base"
+                  >
+                    {l}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            {loading ? (
-              <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="mt-4 text-gray-600 dark:text-gray-400">Loading your progress...</p>
+            <Link
+              href={recommendation.href}
+              className="px-6 py-3 rounded-full bg-cyan-500 text-black font-semibold text-xs uppercase tracking-wider hover:bg-cyan-400 transition-all flex items-center gap-2 self-start shadow-[0_0_20px_rgba(56,189,248,0.4)]"
+            >
+              <span>{recommendation.action}</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {/* Weak Letters Focus Card */}
+          <div className="lg:col-span-4 p-8 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-amber-400 mb-3">
+                <AlertCircle className="w-4 h-4" />
+                <h4 className="text-sm font-semibold text-white">Needs Practice</h4>
               </div>
-            ) : error ? (
-              <Card className="p-6 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
-                <div className="space-y-4">
-                  <p className="text-red-700 dark:text-red-400 font-semibold">Error loading dashboard</p>
-                  <p className="text-red-600 dark:text-red-300 text-sm">{error}</p>
-                  <div className="pt-4 border-t border-red-200 dark:border-red-800">
-                    <p className="text-sm text-red-600 dark:text-red-300 mb-2">Troubleshooting:</p>
-                    <ul className="text-sm text-red-600 dark:text-red-300 list-disc list-inside space-y-1">
-                      <li>Make sure the backend server is running on port 8000</li>
-                      <li>Check that your Supabase database is configured correctly</li>
-                      <li>Verify your .env.local has the correct API_URL</li>
-                      <li>Check the browser console for more details</li>
-                    </ul>
+              <p className="text-xs text-zinc-400 leading-relaxed mb-6 font-light">
+                Signs with lower recognition accuracy. Practice these to build smoother hand transitions.
+              </p>
+
+              {weakLetters.length > 0 ? (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {weakLetters.map((char) => (
+                    <Link
+                      key={char}
+                      href={`/practice?letter=${char}`}
+                      className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-mono text-sm font-bold transition-all"
+                    >
+                      {char}
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-emerald-400 font-mono">No weak letters recorded yet!</p>
+              )}
+            </div>
+
+            <div className="text-[11px] text-zinc-500 pt-4 border-t border-white/5">
+              Refreshed dynamically from local session logs.
+            </div>
+          </div>
+        </div>
+
+        {/* Complete 26-Letter Mastery Matrix */}
+        <div className="p-8 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-2xl shadow-xl mb-12">
+          <h3 className="text-lg font-bold text-white mb-6">Alphabet Mastery Matrix</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+            {ASL_CURRICULUM.map((lesson) => {
+              const stat = journey.letterStats[lesson.letter];
+              const isMastered = stat?.isMastered;
+              const hasAttempts = (stat?.attempts || 0) > 0;
+
+              return (
+                <Link
+                  key={lesson.letter}
+                  href={`/learn/${lesson.id}`}
+                  className={`p-3.5 rounded-2xl border transition-all flex flex-col items-center group ${
+                    isMastered
+                      ? 'bg-emerald-950/20 border-emerald-500/30 hover:border-emerald-500/60'
+                      : hasAttempts
+                      ? 'bg-blue-950/20 border-blue-500/30 hover:border-blue-500/60'
+                      : 'bg-white/[0.02] border-white/5 hover:border-white/20'
+                  }`}
+                >
+                  <span className="text-xl font-bold font-mono text-white mb-1">
+                    {lesson.letter}
+                  </span>
+                  <span
+                    className={`text-[9px] font-mono uppercase ${
+                      isMastered
+                        ? 'text-emerald-400'
+                        : hasAttempts
+                        ? 'text-blue-400'
+                        : 'text-zinc-500'
+                    }`}
+                  >
+                    {isMastered ? 'Mastered' : hasAttempts ? `${Math.round((stat?.accuracy || 0) * 100)}%` : 'New'}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Recent Quiz Sessions Table */}
+        {journey.quizHistory.length > 0 && (
+          <div className="p-8 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-2xl shadow-xl">
+            <h3 className="text-lg font-bold text-white mb-4">Recent Quiz Performance</h3>
+            <div className="divide-y divide-white/5">
+              {journey.quizHistory.slice(0, 5).map((q) => (
+                <div key={q.id} className="py-3 flex items-center justify-between text-xs font-mono">
+                  <div className="flex items-center gap-3">
+                    <Award className="w-4 h-4 text-cyan-400" />
+                    <span className="text-white capitalize">{q.mode.replace('_', ' ')}</span>
+                    <span className="text-zinc-500">
+                      {new Date(q.timestamp).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-zinc-400">Score: {q.score}/{q.total}</span>
+                    <span className="text-emerald-400 font-bold">{Math.round(q.accuracy * 100)}%</span>
                   </div>
                 </div>
-              </Card>
-            ) : (
-              <>
-                {/* Statistics Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                  <Card className="p-6 bg-gray-900/30 border-gray-800 hover:bg-gray-900/50 transition-all group">
-                    <h3 className="text-sm font-medium text-gray-400 mb-2">
-                      Total Attempts
-                    </h3>
-                    <p className="text-3xl font-bold group-hover:scale-105 transition-transform">{stats?.total_attempts || 0}</p>
-                  </Card>
-
-                  <Card className="p-6 bg-gray-900/30 border-gray-800 hover:bg-gray-900/50 transition-all group">
-                    <h3 className="text-sm font-medium text-gray-400 mb-2">
-                      Correct Attempts
-                    </h3>
-                    <p className="text-3xl font-bold text-green-400 group-hover:scale-105 transition-transform">
-                      {stats?.correct_attempts || 0}
-                    </p>
-                  </Card>
-
-                  <Card className="p-6 bg-gray-900/30 border-gray-800 hover:bg-gray-900/50 transition-all group">
-                    <h3 className="text-sm font-medium text-gray-400 mb-2">
-                      Accuracy Rate
-                    </h3>
-                    <p className="text-3xl font-bold text-blue-400 group-hover:scale-105 transition-transform">
-                      {stats?.accuracy_rate ? Math.round(stats.accuracy_rate) : 0}%
-                    </p>
-                  </Card>
-
-                  <Card className="p-6 bg-gray-900/30 border-gray-800 hover:bg-gray-900/50 transition-all group">
-                    <h3 className="text-sm font-medium text-gray-400 mb-2">
-                      Lessons Practiced
-                    </h3>
-                    <p className="text-3xl font-bold group-hover:scale-105 transition-transform">{stats?.lessons_practiced || 0}</p>
-                  </Card>
-                </div>
-
-                {/* Charts */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                  <Card className="p-6 bg-gray-900/30 border-gray-800 hover:border-gray-700 transition-all">
-                    <h3 className="text-lg font-semibold mb-4 text-gray-300">Accuracy Over Time</h3>
-                    {accuracyOverTime.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={accuracyOverTime}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="attempt" />
-                          <YAxis domain={[0, 100]} />
-                          <Tooltip />
-                          <Legend />
-                          <Line
-                            type="monotone"
-                            dataKey="accuracy"
-                            stroke="#3b82f6"
-                            strokeWidth={2}
-                            name="Accuracy (%)"
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="confidence"
-                            stroke="#10b981"
-                            strokeWidth={2}
-                            name="Confidence (%)"
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="h-[300px] flex items-center justify-center text-gray-500">
-                        No data yet. Start practicing to see your progress!
-                      </div>
-                    )}
-                  </Card>
-
-                  <Card className="p-6 bg-gray-900/30 border-gray-800 hover:border-gray-700 transition-all">
-                    <h3 className="text-lg font-semibold mb-4 text-gray-300">Most Practiced Signs</h3>
-                    {signData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={signData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="sign" angle={-45} textAnchor="end" height={100} />
-                          <YAxis />
-                          <Tooltip />
-                          <Bar dataKey="count" fill="#3b82f6" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="h-[300px] flex items-center justify-center text-gray-500">
-                        No data yet. Start practicing to see your progress!
-                      </div>
-                    )}
-          </Card>
-                </div>
-
-                {/* Recent Sessions */}
-                <Card className="p-6 bg-gray-900/30 border-gray-800">
-                  <h3 className="text-lg font-semibold mb-4 text-gray-300">Recent Practice Sessions</h3>
-                  {sessions.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left p-2">Sign</th>
-                            <th className="text-left p-2">Confidence</th>
-                            <th className="text-left p-2">Result</th>
-                            <th className="text-left p-2">Date</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sessions.slice(0, 10).map((session) => (
-                            <tr key={session.id} className="border-b">
-                              <td className="p-2">{session.sign_detected || 'Unknown'}</td>
-                              <td className="p-2">
-                                {Math.round(session.confidence * 100)}%
-                              </td>
-                              <td className="p-2">
-                                {session.is_correct !== null && session.is_correct !== undefined ? (
-                                  <span
-                                    className={`px-2 py-1 rounded text-sm ${
-                                      session.is_correct === 1
-                                        ? 'bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400'
-                                        : 'bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400'
-                                    }`}
-                                  >
-                                    {session.is_correct === 1 ? 'Correct' : 'Incorrect'}
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-1 rounded text-sm bg-gray-100 dark:bg-gray-900/20 text-gray-700 dark:text-gray-400">
-                                    N/A
-                                  </span>
-                                )}
-                              </td>
-                              <td className="p-2 text-sm text-gray-600 dark:text-gray-400">
-                                {new Date(session.timestamp).toLocaleDateString()}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      No practice sessions yet. Start practicing to track your progress!
-                    </div>
-                  )}
-                </Card>
-              </>
-            )}
-        </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
-    </ProtectedRoute>
   );
 }

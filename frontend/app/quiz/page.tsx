@@ -1,583 +1,352 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { Navigation } from '@/components/Navigation';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { lessonsApi } from '@/lib/api';
-import { CheckCircle2, XCircle, RotateCcw } from 'lucide-react';
+import { VisionCamera } from '@/components/VisionCamera';
+import { ASL_CURRICULUM, ASLLessonData } from '@/lib/asl-curriculum';
+import progressStore from '@/lib/progress-store';
+import { SmoothedPrediction } from '@/lib/prediction-smoother';
+import {
+  Sparkles,
+  Award,
+  CheckCircle2,
+  XCircle,
+  RotateCcw,
+  Flame,
+  ArrowRight,
+  Clock,
+  Zap,
+} from 'lucide-react';
 
-interface Lesson {
-  id: number;
-  title: string;
-  description: string;
-  category: string;
-  difficulty: string;
-  sign_name: string;
-}
-
-type QuizMode = 'setup' | 'quiz' | 'results';
-type SelectionMode = 'random-all' | 'random-category' | 'custom';
+type QuizState = 'INTRO' | 'COUNTDOWN' | 'ACTIVE_QUESTION' | 'FEEDBACK' | 'SUMMARY';
 
 export default function QuizPage() {
-  const router = useRouter();
-  const [mode, setMode] = useState<QuizMode>('setup');
-  const [selectionMode, setSelectionMode] = useState<SelectionMode>('random-all');
-  const [allLessons, setAllLessons] = useState<Lesson[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('alphabet');
-  const [numQuestions, setNumQuestions] = useState<number>(10);
-  const [selectedLetters, setSelectedLetters] = useState<string[]>([]);
-  const [quizQuestions, setQuizQuestions] = useState<Lesson[]>([]);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [userAnswers, setUserAnswers] = useState<{ [key: number]: string }>({});
-  const [results, setResults] = useState<{ correct: number; total: number }>({ correct: 0, total: 0 });
-  const [loading, setLoading] = useState(true);
-  const [imageErrors, setImageErrors] = useState<{ [key: string]: boolean }>({});
-  const [questionOptions, setQuestionOptions] = useState<{ [key: number]: string[] }>({});
+  const [quizState, setQuizState] = useState<QuizState>('INTRO');
+  const [questionCount, setQuestionCount] = useState<number>(5);
+  const [quizLetters, setQuizLetters] = useState<string[]>([]);
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [countdown, setCountdown] = useState<number>(3);
+  const [score, setScore] = useState<number>(0);
+  const [streak, setStreak] = useState<number>(0);
+  const [bestStreak, setBestStreak] = useState<number>(0);
 
-  useEffect(() => {
-    fetchLessons();
-  }, []);
+  // Active question state
+  const [latestPred, setLatestPred] = useState<SmoothedPrediction | null>(null);
+  const [questionResult, setQuestionResult] = useState<{
+    isCorrect: boolean;
+    detectedSign: string;
+    confidence: number;
+  } | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState<number>(10);
 
-  const fetchLessons = async () => {
-    try {
-      setLoading(true);
-      const data = await lessonsApi.getAll();
-      const sorted = data.sort((a: Lesson, b: Lesson) => {
-        if (a.sign_name && b.sign_name) {
-          return a.sign_name.localeCompare(b.sign_name);
+  const currentTarget = quizLetters[currentIndex] || 'A';
+
+  const startCountdown = () => {
+    setQuizState('COUNTDOWN');
+    setCountdown(3);
+
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setQuizState('ACTIVE_QUESTION');
+          setTimeRemaining(10);
+          setLatestPred(null);
+          setQuestionResult(null);
+          return 0;
         }
-        return a.id - b.id;
+        return prev - 1;
       });
-      setAllLessons(sorted);
-    } catch (err) {
-      console.error('Failed to load lessons:', err);
-    } finally {
-      setLoading(false);
-    }
+    }, 1000);
   };
 
-  const categories = Array.from(new Set(allLessons.map(l => l.category))).filter(cat => cat !== 'basic_words');
-  // Only get A-Z letters
-  const alphabetLetters = allLessons
-    .filter(l => {
-      const signName = l.sign_name;
-      return signName && signName.length === 1 && /^[A-Z]$/.test(signName);
-    })
-    .map(l => l.sign_name)
-    .sort();
-
-  const toggleLetter = (letter: string) => {
-    if (selectedLetters.includes(letter)) {
-      setSelectedLetters(selectedLetters.filter(l => l !== letter));
+  const advanceQuestion = (currentScore: number) => {
+    if (currentIndex + 1 < quizLetters.length) {
+      setCurrentIndex((prev) => prev + 1);
+      startCountdown();
     } else {
-      setSelectedLetters([...selectedLetters, letter]);
+      setQuizState('SUMMARY');
+      progressStore.recordQuizResult(currentScore, quizLetters.length, 'interactive');
     }
   };
+
+  const handleQuestionTimeout = () => {
+    setStreak(0);
+    setQuestionResult({
+      isCorrect: false,
+      detectedSign: latestPred?.sign || 'None',
+      confidence: latestPred?.confidence || 0,
+    });
+    setQuizState('FEEDBACK');
+    progressStore.recordSignAttempt(currentTarget, false);
+
+    setTimeout(() => {
+      advanceQuestion(score);
+    }, 2200);
+  };
+
+  // Timer for active question
+  useEffect(() => {
+    let timer: any;
+    if (quizState === 'ACTIVE_QUESTION') {
+      timer = setInterval(() => {
+        setTimeRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            handleQuestionTimeout();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [quizState, currentIndex, currentTarget, score, latestPred]);
 
   const startQuiz = () => {
-    let questionsPool: Lesson[] = [];
+    // Pick random distinct letters
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const shuffled = [...alphabet].sort(() => Math.random() - 0.5);
+    const chosen = shuffled.slice(0, questionCount);
 
-    // Filter to only alphabet letters (A-Z)
-    const alphabetOnly = allLessons.filter(l => {
-      const signName = l.sign_name;
-      return signName && signName.length === 1 && /^[A-Z]$/.test(signName);
-    });
-
-    if (selectionMode === 'random-all') {
-      questionsPool = [...alphabetOnly];
-    } else if (selectionMode === 'random-category') {
-      questionsPool = alphabetOnly.filter(l => l.category === selectedCategory);
-    } else if (selectionMode === 'custom') {
-      questionsPool = alphabetOnly.filter(l => selectedLetters.includes(l.sign_name));
-    }
-
-    // Shuffle and select questions
-    const shuffled = questionsPool.sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, Math.min(numQuestions, questionsPool.length));
-
-    // Pre-generate options for all questions
-    const optionsMap: { [key: number]: string[] } = {};
-    selected.forEach((question, index) => {
-      optionsMap[index] = generateOptions(question.sign_name);
-    });
-
-    setQuizQuestions(selected);
-    setQuestionOptions(optionsMap);
-    setCurrentQuestionIndex(0);
-    setUserAnswers({});
-    setImageErrors({});
-    setMode('quiz');
+    setQuizLetters(chosen);
+    setCurrentIndex(0);
+    setScore(0);
+    setStreak(0);
+    setBestStreak(0);
+    startCountdown();
   };
 
-  const handleAnswer = (answer: string) => {
-    setUserAnswers({
-      ...userAnswers,
-      [currentQuestionIndex]: answer
-    });
-  };
+  const handleMatch = (isMatch: boolean, pred: SmoothedPrediction) => {
+    if (quizState !== 'ACTIVE_QUESTION') return;
+    setLatestPred(pred);
 
-  const nextQuestion = () => {
-    if (currentQuestionIndex < quizQuestions.length - 1) {
-      setCurrentQuestionIndex(currentQuestionIndex + 1);
-    } else {
-      finishQuiz();
+    if (isMatch) {
+      // User signed the target correctly!
+      const newScore = score + 1;
+      const newStreak = streak + 1;
+      setScore(newScore);
+      setStreak(newStreak);
+      if (newStreak > bestStreak) setBestStreak(newStreak);
+
+      setQuestionResult({
+        isCorrect: true,
+        detectedSign: pred.sign,
+        confidence: pred.confidence,
+      });
+      setQuizState('FEEDBACK');
+
+      progressStore.recordSignAttempt(currentTarget, true);
+
+      // Advance after brief celebration
+      setTimeout(() => {
+        advanceQuestion(newScore);
+      }, 1800);
     }
   };
 
-  const previousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-    }
-  };
+  return (
+    <div className="min-h-screen bg-[#02060f] text-white flex flex-col font-sans">
+      <Navigation />
 
-  const finishQuiz = () => {
-    let correct = 0;
-    quizQuestions.forEach((question, index) => {
-      if (userAnswers[index] === question.sign_name) {
-        correct++;
-      }
-    });
+      <main className="container mx-auto px-4 py-8 max-w-5xl flex-1 flex flex-col justify-center">
+        {/* State 1: Intro Setup */}
+        {quizState === 'INTRO' && (
+          <div className="max-w-xl mx-auto w-full p-8 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-2xl shadow-2xl text-center">
+            <div className="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto mb-6 shadow-[0_0_24px_rgba(56,189,248,0.25)]">
+              <Award className="w-8 h-8" />
+            </div>
 
-    setResults({ correct, total: quizQuestions.length });
-    setMode('results');
-  };
+            <h1 className="text-3xl font-light text-white mb-2">
+              Sign Language <span className="font-semibold text-cyan-400">Quiz</span>
+            </h1>
+            <p className="text-sm text-zinc-400 font-light max-w-md mx-auto mb-8">
+              The camera will present target letters one by one. Sign each letter clearly before the timer runs out!
+            </p>
 
-  const resetQuiz = () => {
-    setMode('setup');
-    setCurrentQuestionIndex(0);
-    setUserAnswers({});
-    setQuizQuestions([]);
-  };
-
-  const getASLImageUrl = (letter: string) => {
-    return `https://www.lifeprint.com/asl101/fingerspelling/abc-gifs/${letter.toLowerCase()}.gif`;
-  };
-
-  const generateOptions = (correctAnswer: string): string[] => {
-    const options = new Set<string>([correctAnswer]);
-    // Only use A-Z letters
-    const availableLetters = allLessons
-      .filter(l => {
-        const signName = l.sign_name;
-        return signName && signName.length === 1 && /^[A-Z]$/.test(signName);
-      })
-      .map(l => l.sign_name);
-
-    while (options.size < 4 && options.size < availableLetters.length) {
-      const random = availableLetters[Math.floor(Math.random() * availableLetters.length)];
-      options.add(random);
-    }
-
-    return Array.from(options).sort(() => Math.random() - 0.5);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <Navigation />
-        <main className="container mx-auto px-4 py-8">
-          <div className="text-center py-12">
-            <p className="text-lg">Loading quiz...</p>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // Setup Mode
-  if (mode === 'setup') {
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <Navigation />
-        <main className="container mx-auto px-4 py-8">
-          <div className="max-w-4xl mx-auto">
             <div className="mb-8">
-              <h1 className="text-4xl font-light mb-2 relative inline-block">
-                ASL Quiz
-                <div className="absolute -bottom-2 left-0 right-0 h-px bg-gradient-to-r from-white via-white/50 to-transparent" />
-              </h1>
-              <p className="text-gray-400 mt-4">
-                Test your knowledge of ASL signs
-              </p>
-            </div>
-
-            {/* Quiz Mode Selection */}
-            <Card className="p-6 mb-6 bg-gray-900/30 border-gray-800">
-              <h2 className="text-xl font-semibold mb-4 text-gray-200">Select Quiz Mode</h2>
-              <div className="grid md:grid-cols-3 gap-4">
-                <button
-                  onClick={() => setSelectionMode('random-all')}
-                  className={`p-4 rounded-lg border-2 transition-all ${
-                    selectionMode === 'random-all'
-                      ? 'border-white bg-white/10'
-                      : 'border-gray-700 hover:border-gray-600 bg-gray-900/30'
-                  }`}
-                >
-                  <h3 className="font-semibold mb-1">Random - All</h3>
-                  <p className="text-sm text-gray-400">
-                    Random signs from all categories
-                  </p>
-                </button>
-
-                <button
-                  onClick={() => setSelectionMode('random-category')}
-                  className={`p-4 rounded-lg border-2 transition-all ${
-                    selectionMode === 'random-category'
-                      ? 'border-white bg-white/10'
-                      : 'border-gray-700 hover:border-gray-600 bg-gray-900/30'
-                  }`}
-                >
-                  <h3 className="font-semibold mb-1">Category</h3>
-                  <p className="text-sm text-gray-400">
-                    Random signs from one category
-                  </p>
-                </button>
-
-                <button
-                  onClick={() => setSelectionMode('custom')}
-                  className={`p-4 rounded-lg border-2 transition-all ${
-                    selectionMode === 'custom'
-                      ? 'border-white bg-white/10'
-                      : 'border-gray-700 hover:border-gray-600 bg-gray-900/30'
-                  }`}
-                >
-                  <h3 className="font-semibold mb-1">Custom</h3>
-                  <p className="text-sm text-gray-400">
-                    Choose specific letters
-                  </p>
-                </button>
-              </div>
-            </Card>
-
-            {/* Category Selection (for random-category mode) */}
-            {selectionMode === 'random-category' && (
-              <Card className="p-6 mb-6 bg-gray-900/30 border-gray-800">
-                <h2 className="text-xl font-semibold mb-4 text-gray-200">Select Category</h2>
-                <div className="flex gap-2 flex-wrap">
-                  {categories.map((cat) => (
-                    <Button
-                      key={cat}
-                      variant={selectedCategory === cat ? 'default' : 'outline'}
-                      onClick={() => setSelectedCategory(cat)}
-                    >
-                      {cat.charAt(0).toUpperCase() + cat.slice(1).replace('_', ' ')}
-                    </Button>
-                  ))}
-                </div>
-              </Card>
-            )}
-
-            {/* Letter Selection (for custom mode) */}
-            {selectionMode === 'custom' && (
-              <Card className="p-6 mb-6 bg-gray-900/30 border-gray-800">
-                <h2 className="text-xl font-semibold mb-4 text-gray-200">
-                  Select Letters ({selectedLetters.length} selected)
-                </h2>
-                <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2 mb-4">
-                  {alphabetLetters.map((letter) => (
-                    <button
-                      key={letter}
-                      onClick={() => toggleLetter(letter)}
-                      className={`p-3 rounded-lg border-2 font-semibold transition-all ${
-                        selectedLetters.includes(letter)
-                          ? 'border-blue-500 bg-blue-900/30 text-blue-300'
-                          : 'border-gray-700 hover:border-blue-300'
-                      }`}
-                    >
-                      {letter}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => setSelectedLetters([...alphabetLetters])}
-                  >
-                    Select All
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setSelectedLetters([])}
-                  >
-                    Clear All
-                  </Button>
-                </div>
-              </Card>
-            )}
-
-            {/* Number of Questions */}
-            <Card className="p-6 mb-6 bg-gray-900/30 border-gray-800">
-              <h2 className="text-xl font-semibold mb-4 text-gray-200">Number of Questions</h2>
-              <div className="flex items-center gap-4">
-                <input
-                  type="range"
-                  min="5"
-                  max="26"
-                  value={numQuestions}
-                  onChange={(e) => setNumQuestions(parseInt(e.target.value))}
-                  className="flex-1"
-                />
-                <span className="text-2xl font-bold w-16 text-center">{numQuestions}</span>
-              </div>
-              <div className="flex justify-between text-sm text-gray-500 mt-2">
-                <span>5</span>
-                <span>26</span>
-              </div>
-            </Card>
-
-            {/* Start Button */}
-            <Button
-              size="lg"
-              className="w-full"
-              onClick={startQuiz}
-              disabled={
-                (selectionMode === 'custom' && selectedLetters.length === 0) ||
-                (selectionMode === 'random-category' && !selectedCategory)
-              }
-            >
-              Start Quiz
-            </Button>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // Quiz Mode
-  if (mode === 'quiz' && quizQuestions.length > 0) {
-    const currentQuestion = quizQuestions[currentQuestionIndex];
-    const options = questionOptions[currentQuestionIndex] || [];
-    const userAnswer = userAnswers[currentQuestionIndex];
-
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <Navigation />
-        <main className="container mx-auto px-4 py-8">
-          <div className="max-w-2xl mx-auto">
-            {/* Progress */}
-            <div className="mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">
-                  Question {currentQuestionIndex + 1} of {quizQuestions.length}
-                </span>
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {Object.keys(userAnswers).length} answered
-                </span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all"
-                  style={{ width: `${((currentQuestionIndex + 1) / quizQuestions.length) * 100}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Question */}
-            <Card className="p-8 mb-6 bg-gray-900/30 border-gray-800">
-              <h2 className="text-2xl font-semibold mb-4 text-center text-gray-200">
-                Which sign represents the letter:
-              </h2>
-
-              {/* Target Letter */}
-              <div className="mb-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg p-12 flex items-center justify-center">
-                <span className="text-9xl font-bold text-white">
-                  {currentQuestion.sign_name}
-                </span>
-              </div>
-
-              <p className="text-center text-gray-400 mb-6">
-                Select the correct ASL sign for this letter
-              </p>
-
-              {/* Image Options */}
-              <div className="grid grid-cols-2 gap-4">
-                {options.map((option) => (
+              <label className="text-xs font-mono uppercase text-zinc-400 tracking-wider block mb-3">
+                Select Number of Questions:
+              </label>
+              <div className="flex justify-center gap-3">
+                {[5, 10, 15].map((cnt) => (
                   <button
-                    key={option}
-                    onClick={() => handleAnswer(option)}
-                    className={`p-4 rounded-lg border-2 transition-all relative ${
-                      userAnswer === option
-                        ? 'border-blue-500 bg-blue-900/20'
-                        : 'border-gray-700 hover:border-blue-300'
+                    key={cnt}
+                    onClick={() => setQuestionCount(cnt)}
+                    className={`px-5 py-2.5 rounded-xl font-mono text-xs font-semibold transition-all ${
+                      questionCount === cnt
+                        ? 'bg-cyan-500 text-black shadow-[0_0_16px_rgba(56,189,248,0.4)]'
+                        : 'bg-white/[0.04] text-zinc-300 border border-white/10 hover:bg-white/[0.08]'
                     }`}
                   >
-                    <div className="aspect-square bg-gray-800 rounded-lg flex items-center justify-center overflow-hidden">
-                      {!imageErrors[option] ? (
-                        <img
-                          src={getASLImageUrl(option)}
-                          alt={`ASL sign option`}
-                          className="w-full h-full object-contain p-2"
-                          onError={() => setImageErrors(prev => ({ ...prev, [option]: true }))}
-                        />
-                      ) : (
-                        <div className="text-4xl font-bold text-gray-400">?</div>
-                      )}
-                    </div>
-                    {userAnswer === option && (
-                      <div className="absolute top-2 right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
-                        <span className="text-white text-[10px] font-bold">OK</span>
-                      </div>
-                    )}
+                    {cnt} Questions
                   </button>
                 ))}
               </div>
-            </Card>
-
-            {/* Navigation */}
-            <div className="flex justify-between gap-4">
-              <Button
-                variant="outline"
-                onClick={previousQuestion}
-                disabled={currentQuestionIndex === 0}
-              >
-                Previous
-              </Button>
-              <Button
-                onClick={nextQuestion}
-                disabled={!userAnswer}
-              >
-                {currentQuestionIndex === quizQuestions.length - 1 ? 'Finish' : 'Next'}
-              </Button>
             </div>
+
+            <button
+              onClick={startQuiz}
+              className="cta-glass px-10 py-3.5 text-sm font-semibold tracking-wide text-white uppercase"
+            >
+              Start Quiz
+            </button>
           </div>
-        </main>
-      </div>
-    );
-  }
+        )}
 
-  // Results Mode
-  if (mode === 'results') {
-    const percentage = Math.round((results.correct / results.total) * 100);
+        {/* State 2: 3-2-1 Countdown */}
+        {quizState === 'COUNTDOWN' && (
+          <div className="text-center animate-fade-in">
+            <span className="text-xs font-mono uppercase tracking-widest text-zinc-500 mb-4 block">
+              Question {currentIndex + 1} of {quizLetters.length}
+            </span>
+            <div className="text-8xl sm:text-9xl font-bold font-mono text-cyan-400 animate-pulse my-6">
+              {countdown}
+            </div>
+            <p className="text-base text-zinc-300 font-light">Get your hand ready in the camera frame...</p>
+          </div>
+        )}
 
-    return (
-      <div className="min-h-screen bg-black text-white">
-        <Navigation />
-        <main className="container mx-auto px-4 py-8">
-          <div className="max-w-4xl mx-auto">
-            {/* Results Header */}
-            <Card className="p-8 mb-6 text-center bg-gray-900/30 border-gray-800">
-              <h1 className="text-4xl font-bold mb-4 text-white">Quiz Complete!</h1>
+        {/* State 3 & 4: Active Question & Feedback */}
+        {(quizState === 'ACTIVE_QUESTION' || quizState === 'FEEDBACK') && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            {/* Left Column: Target Prompt */}
+            <div className="lg:col-span-5 flex flex-col gap-5">
+              <div className="p-8 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-2xl shadow-xl">
+                <div className="flex items-center justify-between text-xs font-mono text-zinc-400 mb-6 pb-3 border-b border-white/10">
+                  <span>Question {currentIndex + 1} of {quizLetters.length}</span>
+                  <div className="flex items-center gap-1.5 text-amber-400">
+                    <Flame className="w-4 h-4 fill-amber-400" />
+                    <span>Streak: {streak}</span>
+                  </div>
+                </div>
 
-              {/* Score Circle */}
-              <div className="my-8">
-                <div className="inline-flex items-center justify-center w-48 h-48 rounded-full border-8 border-blue-500 bg-blue-900/20">
-                  <div className="text-center">
-                    <div className="text-6xl font-bold text-blue-400">
-                      {percentage}%
-                    </div>
-                    <div className="text-sm text-gray-400 mt-2">
-                      {results.correct} / {results.total} correct
-                    </div>
+                <div className="text-center py-4">
+                  <span className="text-xs font-mono uppercase tracking-widest text-cyan-400 block mb-2">
+                    Show the sign for:
+                  </span>
+                  <div className="text-7xl font-bold font-mono text-white tracking-tight mb-2">
+                    {currentTarget}
+                  </div>
+                  <p className="text-xs text-zinc-400 font-light">
+                    Hold the handshape steady in front of the lens
+                  </p>
+                </div>
+
+                {/* Remaining Time Bar */}
+                <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                    <Clock className="w-4 h-4 text-cyan-400" />
+                    <span>Time left: {timeRemaining}s</span>
+                  </div>
+                  <div className="w-28 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-amber-400 rounded-full transition-all duration-1000"
+                      style={{ width: `${(timeRemaining / 10) * 100}%` }}
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Performance Message */}
-              <div className="mb-6">
-                {percentage === 100 && (
-                  <p className="text-2xl font-semibold text-green-400">
-                    Perfect! Outstanding work!
-                  </p>
-                )}
-                {percentage >= 80 && percentage < 100 && (
-                  <p className="text-2xl font-semibold text-blue-400">
-                    Great job! Keep it up!
-                  </p>
-                )}
-                {percentage >= 60 && percentage < 80 && (
-                  <p className="text-2xl font-semibold text-yellow-400">
-                    Good effort! Practice makes perfect!
-                  </p>
-                )}
-                {percentage < 60 && (
-                  <p className="text-2xl font-semibold text-orange-400">
-                    Keep practicing! You'll get there!
-                  </p>
-                )}
-              </div>
-            </Card>
-
-            {/* Detailed Results */}
-            <Card className="p-6 mb-6 bg-gray-900/30 border-gray-800">
-              <h2 className="text-xl font-semibold mb-4 text-gray-200">Review Your Answers</h2>
-              <div className="space-y-3">
-                {quizQuestions.map((question, index) => {
-                  const userAnswer = userAnswers[index];
-                  const isCorrect = userAnswer === question.sign_name;
-
-                  return (
-                    <div
-                      key={index}
-                      className={`p-4 rounded-lg border-2 ${
-                        isCorrect
-                          ? 'border-green-800 bg-green-900/20'
-                          : 'border-red-800 bg-red-900/20'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {isCorrect ? (
-                            <CheckCircle2 className="w-6 h-6 text-green-600" />
-                          ) : (
-                            <XCircle className="w-6 h-6 text-red-600" />
-                          )}
-                          <span className="font-medium">Question {index + 1}</span>
-                        </div>
-                        {!isCorrect && (
-                          <div className="text-right space-y-1">
-                            <div className="text-sm">
-                              <span className="text-gray-400">You answered:</span>{' '}
-                              <span className="font-semibold text-red-400">
-                                {userAnswer || 'Not answered'}
-                              </span>
-                            </div>
-                            <div className="text-sm">
-                              <span className="text-gray-400">Correct answer:</span>{' '}
-                              <span className="font-semibold text-green-400">
-                                {question.sign_name}
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                        {isCorrect && (
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-green-400">
-                              Correct!
-                            </div>
-                          </div>
-                        )}
-                      </div>
+              {/* Feedback Alert Overlay */}
+              {questionResult && (
+                <div
+                  className={`p-5 rounded-3xl border animate-fade-in ${
+                    questionResult.isCorrect
+                      ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200 shadow-[0_0_24px_rgba(16,185,129,0.3)]'
+                      : 'bg-red-950/80 border-red-500/50 text-red-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {questionResult.isCorrect ? (
+                      <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                    ) : (
+                      <XCircle className="w-6 h-6 text-red-400" />
+                    )}
+                    <div>
+                      <h4 className="text-sm font-bold text-white">
+                        {questionResult.isCorrect ? `Correct! That's ${currentTarget}` : `Time's Up for ${currentTarget}`}
+                      </h4>
+                      <p className="text-xs text-zinc-300">
+                        Detected: {questionResult.detectedSign} ({Math.round(questionResult.confidence * 100)}%)
+                      </p>
                     </div>
-                  );
-                })}
-              </div>
-            </Card>
+                  </div>
+                </div>
+              )}
+            </div>
 
-            {/* Actions */}
-            <div className="flex gap-4">
-              <Button
-                variant="outline"
-                onClick={resetQuiz}
-                className="flex-1"
-              >
-                <RotateCcw className="w-4 h-4 mr-2" />
-                New Quiz
-              </Button>
-              <Button
-                onClick={() => router.push('/practice')}
-                className="flex-1"
-              >
-                Practice Mode
-              </Button>
+            {/* Right Column: Live Camera */}
+            <div className="lg:col-span-7 flex flex-col">
+              <div className="p-6 rounded-3xl bg-[#07111F]/80 border border-white/10 backdrop-blur-2xl shadow-xl">
+                <VisionCamera
+                  targetLetter={currentTarget}
+                  onMatch={handleMatch}
+                  width={600}
+                  height={450}
+                  autoStart={true}
+                />
+              </div>
             </div>
           </div>
-        </main>
-      </div>
-    );
-  }
+        )}
 
-  return null;
+        {/* State 5: Quiz Summary */}
+        {quizState === 'SUMMARY' && (
+          <div className="max-w-xl mx-auto w-full p-8 rounded-3xl bg-[#07111F]/90 border border-white/10 backdrop-blur-2xl shadow-2xl text-center animate-fade-in">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#38bdf8] via-[#06b6d4] to-[#fbbf24] p-[2px] mx-auto mb-6 shadow-[0_0_30px_rgba(56,189,248,0.4)]">
+              <div className="w-full h-full rounded-2xl bg-[#02060f] flex items-center justify-center">
+                <Award className="w-8 h-8 text-cyan-400" />
+              </div>
+            </div>
+
+            <h2 className="text-3xl font-light text-white mb-1">Quiz Completed!</h2>
+            <p className="text-xs text-zinc-400 mb-8 font-light">
+              Your results have been securely recorded in your local learning journey.
+            </p>
+
+            <div className="grid grid-cols-3 gap-4 p-5 rounded-2xl bg-white/[0.03] border border-white/5 mb-8">
+              <div>
+                <div className="text-2xl font-bold font-mono text-cyan-400">
+                  {score}/{quizLetters.length}
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-1">Score</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold font-mono text-emerald-400">
+                  {Math.round((score / quizLetters.length) * 100)}%
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-1">Accuracy</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold font-mono text-amber-400">
+                  {bestStreak}
+                </div>
+                <div className="text-[11px] text-zinc-400 mt-1">Best Streak</div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={startQuiz}
+                className="px-6 py-3 rounded-full bg-white text-black font-semibold text-xs uppercase tracking-wider hover:bg-zinc-200 transition-all flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Retake Quiz</span>
+              </button>
+
+              <Link
+                href="/learn"
+                className="px-6 py-3 rounded-full bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-xs font-semibold text-white transition-all flex items-center gap-2"
+              >
+                <span>Continue Lessons</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
 }
