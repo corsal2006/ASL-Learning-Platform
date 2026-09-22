@@ -1,0 +1,9 @@
+search-path = [
+    ".",
+    "backend",
+    "backend/database",
+    "backend/routes"
+]
+
+[diagnostics]
+missing-import = "ignore"

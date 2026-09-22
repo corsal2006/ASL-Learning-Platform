@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from supabase import create_client, Client
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

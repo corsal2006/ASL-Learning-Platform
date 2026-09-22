@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -23,12 +24,14 @@ origins = [
 
 for url in frontend_url.split(","):
     url = url.strip()
-    if url and "localhost" not in url:
+    if url and url not in origins:
         origins.append(url.rstrip("/"))
 
+allow_all = "*" in origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"] if allow_all else origins,
+    allow_origin_regex=None if allow_all else r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -122,9 +125,11 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    is_dev = os.getenv("ENVIRONMENT", "development").lower() != "production"
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True
+        port=port,
+        reload=is_dev
     )
